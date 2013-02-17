@@ -1,0 +1,456 @@
+/*
+ * CDDL HEADER START
+ *
+ * The contents of this file are subject to the terms of the
+ * Common Development and Distribution License (the "License").
+ * You may not use this file except in compliance with the License.
+ *
+ * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
+ * or http://www.opensolaris.org/os/licensing.
+ * See the License for the specific language governing permissions
+ * and limitations under the License.
+ *
+ * When distributing Covered Code, include this CDDL HEADER in each
+ * file and include the License file at usr/src/OPENSOLARIS.LICENSE.
+ * If applicable, add the following below this CDDL HEADER, with the
+ * fields enclosed by brackets "[]" replaced with your own identifying
+ * information: Portions Copyright [yyyy] [name of copyright owner]
+ *
+ * CDDL HEADER END
+ */
+
+/*
+ * Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
+ * Use is subject to license terms.
+ */
+
+#pragma ident	"@(#)mlib_v_VideoH263OvrlapMC_S16_U8.c	9.3	07/11/05 SMI"
+
+/*
+ * FUNCTION
+ *   mlib_VideoH263OverlappedMC_S16_U8 - Generates the 8x8 luminance prediction
+ *                                       block (motion-compensated reference
+ *                                       block) in the Advanced Prediction Mode
+ *                                       for a H.263 decoder
+ *
+ * SYNOPSIS
+ *      mlib_status
+ *      mlib_VideoH263OverlappedMC_S16_U8(mlib_s16      mc_block[64],
+ *                                        const mlib_u8 *ref_frame,
+ *                                        mlib_s32      mch,
+ *                                        mlib_s32      mcv,
+ *                                        mlib_s32      mah,
+ *                                        mlib_s32      mav,
+ *                                        mlib_s32      mbh,
+ *                                        mlib_s32      mbv,
+ *                                        mlib_s32      mlh,
+ *                                        mlib_s32      mlv,
+ *                                        mlib_s32      mrh,
+ *                                        mlib_s32      mrv,
+ *                                        mlib_s32      ref_stride);
+ *
+ * ARGUMENTS
+ *      mc_block   Pointer to the 8x8 motion-compensated reference block,
+ *                 must be 8-byte aligned
+ *      ref_block  Pointer to reference block in
+ *                 the reference frame at the same
+ *                 location as the current block in the current frame
+ *      mch        Horizontal coordinate of the motion vector
+ *                 for the current block
+ *      mcv        Vertical coordinate of the motion vector
+ *                 for the current block
+ *      mah        Horizontal coordinate of the motion vector
+ *                 for the block above the
+ *                 current block
+ *      mav        Vertical coordinate of the motion vector
+ *                 for the block above the current block
+ *      mbh        Horizontal coordinate of the motion vector
+ *                 for the block below the current block
+ *      mbv        Vertical coordinate of the motion vector
+ *                 for the block below the current block
+ *      mlh        Horizontal coordinate of the motion vector
+ *                 for the block to the left of the current block
+ *      mlv        Vertical coordinate of the motion vector
+ *                 for the block to the left of the current block
+ *      mrh        Horizontal coordinate of the motion vector
+ *                 for the block to the right of the current block
+ *      mrv        Vertical coordinate of the motion vector
+ *                 for the block to the right of the current block
+ *      ref_stride Stride in bytes between adjacent rows
+ *                 in the interpolated reference
+ *                 block, must be a multiply of 8
+ */
+
+#include <mlib_video.h>
+#include <vis_proto.h>
+
+/* *********************************************************** */
+
+#if ! defined(__MEDIALIB_OLD_NAMES)
+#if defined(__SUNPRO_C)
+
+#pragma weak mlib_VideoH263OverlappedMC_S16_U8 = \
+	__mlib_VideoH263OverlappedMC_S16_U8
+
+#elif defined(__GNUC__)	/* defined(__SUNPRO_C) */
+__typeof__(__mlib_VideoH263OverlappedMC_S16_U8)
+	mlib_VideoH263OverlappedMC_S16_U8
+	__attribute__((weak, alias("__mlib_VideoH263OverlappedMC_S16_U8")));
+
+#else /* defined(__SUNPRO_C) */
+
+#error  "unknown platform"
+
+#endif /* defined(__SUNPRO_C) */
+#endif /* ! defined(__MEDIALIB_OLD_NAMES) */
+
+/* *********************************************************** */
+
+#define	ACCADD(acc, val, cf)                                    \
+	val = vis_fmul8sux16(val, denom);                       \
+	val = vis_fand(val, dmask);                             \
+	val = vis_fmul8x16(cf, val);                            \
+	acc = vis_fpadd16(acc, val)
+
+/* *********************************************************** */
+
+#define	ACCSET(acc, val, cf)                                    \
+	val = vis_fmul8sux16(val, denom);                       \
+	val = vis_fand(val, dmask);                             \
+	acc = vis_fmul8x16(cf, val)
+
+/* *********************************************************** */
+
+#define	ACCPUT(dst, acc, val, cf)                               \
+	val = vis_fmul8sux16(val, denom);                       \
+	val = vis_fand(val, dmask);                             \
+	val = vis_fmul8x16(cf, val);                            \
+	acc = vis_fpadd16(acc, val);                            \
+	dst = vis_fmul8x16(frnd, acc)
+
+/* *********************************************************** */
+
+#pragma align 8(mlib_omctab)
+
+static const mlib_u32 mlib_omctab[] = {
+	0x40505050, 0x50505040, 0x50505050, 0x50506060,
+	0x60605050, 0x20202020, 0x10102020, 0x20201010,
+	0x10101010, 0x20101010, 0x10101020, 0x20201010,
+	0x10102020
+};
+
+/* *********************************************************** */
+
+mlib_status
+__mlib_VideoH263OverlappedMC_S16_U8(
+	mlib_s16 mc_block[64],
+	const mlib_u8 *ref_frame,
+	mlib_s32 mch,
+	mlib_s32 mcv,
+	mlib_s32 mah,
+	mlib_s32 mav,
+	mlib_s32 mbh,
+	mlib_s32 mbv,
+	mlib_s32 mlh,
+	mlib_s32 mlv,
+	mlib_s32 mrh,
+	mlib_s32 mrv,
+	mlib_s32 ref_stride)
+{
+	mlib_d64 d0, d1, d2, d3, d4, d5, d6, d7, d8, d9;
+	mlib_d64 d10, d11, d12, d13, d14, d15;
+	mlib_d64 tmp1, tmp2, tmp3;
+	mlib_d64 dmask = vis_fexpand(vis_fones());
+	mlib_d64 denom = vis_fandnot(dmask, vis_fpadd16(dmask, dmask));
+	mlib_f32 reg_H0_00, reg_H0_01, reg_H0_10, reg_H0_20, reg_H0_21;
+	mlib_f32 reg_H1_00, reg_H1_10, reg_H1_11, reg_H1_20, reg_H2_00;
+	mlib_f32 reg_H2_01, reg_H2_10, reg_H2_11;
+	mlib_f32 frnd;
+	mlib_d64 *dp, *sd;
+	const mlib_u8 *sp1, *sp2, *sp3, *sp4, *sp5;
+	mlib_s32 ref_stride2 = ref_stride << 1;
+
+	sp1 = (ref_frame + mch + mcv * ref_stride);
+	sp2 = (ref_frame + mah + mav * ref_stride);
+	sp3 = (ref_frame + mlh + mlv * ref_stride);
+	sp4 = (ref_frame + mrh + 8 + mrv * ref_stride);
+	sp5 = (ref_frame + mbh + (mbv + 8) * ref_stride);
+	dp = (mlib_d64 *)mc_block;
+
+	reg_H0_00 = ((mlib_f32 *)mlib_omctab)[0];
+	reg_H0_01 = ((mlib_f32 *)mlib_omctab)[1];
+	reg_H0_10 = ((mlib_f32 *)mlib_omctab)[2];
+	reg_H0_20 = ((mlib_f32 *)mlib_omctab)[3];
+	reg_H0_21 = ((mlib_f32 *)mlib_omctab)[4];
+
+	reg_H1_00 = ((mlib_f32 *)mlib_omctab)[5];
+	reg_H1_10 = ((mlib_f32 *)mlib_omctab)[6];
+	reg_H1_11 = ((mlib_f32 *)mlib_omctab)[7];
+	reg_H1_20 = ((mlib_f32 *)mlib_omctab)[8];
+
+	reg_H2_00 = ((mlib_f32 *)mlib_omctab)[9];
+	reg_H2_01 = ((mlib_f32 *)mlib_omctab)[10];
+	reg_H2_10 = ((mlib_f32 *)mlib_omctab)[11];
+	reg_H2_11 = ((mlib_f32 *)mlib_omctab)[12];
+
+	frnd = ((mlib_f32 *)mlib_omctab)[5];
+
+/*
+ * central
+ */
+	sd = (mlib_d64 *)vis_alignaddr((void *)sp1, 0);
+	tmp1 = sd[0];
+	tmp2 = sd[1];
+	tmp3 = sd[2];
+	tmp1 = vis_faligndata(tmp1, tmp2);
+	tmp2 = vis_faligndata(tmp2, tmp3);
+	ACCSET(d0, tmp1, reg_H0_00);
+	ACCSET(d1, tmp2, reg_H0_01);
+	sd = (mlib_d64 *)((mlib_u8 *)sd + ref_stride2);
+
+	tmp1 = sd[0];
+	tmp2 = sd[1];
+	tmp3 = sd[2];
+	tmp1 = vis_faligndata(tmp1, tmp2);
+	tmp2 = vis_faligndata(tmp2, tmp3);
+	ACCSET(d2, tmp1, reg_H0_10);
+	ACCSET(d3, tmp2, reg_H0_10);
+	sd = (mlib_d64 *)((mlib_u8 *)sd + ref_stride2);
+
+	tmp1 = sd[0];
+	tmp2 = sd[1];
+	tmp3 = sd[2];
+	tmp1 = vis_faligndata(tmp1, tmp2);
+	tmp2 = vis_faligndata(tmp2, tmp3);
+	ACCSET(d4, tmp1, reg_H0_20);
+	ACCSET(d5, tmp2, reg_H0_21);
+	sd = (mlib_d64 *)((mlib_u8 *)sd + ref_stride2);
+
+	tmp1 = sd[0];
+	tmp2 = sd[1];
+	tmp3 = sd[2];
+	tmp1 = vis_faligndata(tmp1, tmp2);
+	tmp2 = vis_faligndata(tmp2, tmp3);
+	ACCSET(d6, tmp1, reg_H0_20);
+	ACCSET(d7, tmp2, reg_H0_21);
+	sd = (mlib_d64 *)((mlib_u8 *)sd + ref_stride2);
+
+	tmp1 = sd[0];
+	tmp2 = sd[1];
+	tmp3 = sd[2];
+	tmp1 = vis_faligndata(tmp1, tmp2);
+	tmp2 = vis_faligndata(tmp2, tmp3);
+	ACCSET(d8, tmp1, reg_H0_20);
+	ACCSET(d9, tmp2, reg_H0_21);
+	sd = (mlib_d64 *)((mlib_u8 *)sd + ref_stride2);
+
+	tmp1 = sd[0];
+	tmp2 = sd[1];
+	tmp3 = sd[2];
+	tmp1 = vis_faligndata(tmp1, tmp2);
+	tmp2 = vis_faligndata(tmp2, tmp3);
+	ACCSET(d10, tmp1, reg_H0_20);
+	ACCSET(d11, tmp2, reg_H0_21);
+	sd = (mlib_d64 *)((mlib_u8 *)sd + ref_stride2);
+
+	tmp1 = sd[0];
+	tmp2 = sd[1];
+	tmp3 = sd[2];
+	tmp1 = vis_faligndata(tmp1, tmp2);
+	tmp2 = vis_faligndata(tmp2, tmp3);
+	ACCSET(d12, tmp1, reg_H0_10);
+	ACCSET(d13, tmp2, reg_H0_10);
+	sd = (mlib_d64 *)((mlib_u8 *)sd + ref_stride2);
+
+	tmp1 = sd[0];
+	tmp2 = sd[1];
+	tmp3 = vis_ld_d64_nf(sd + 2);
+	tmp1 = vis_faligndata(tmp1, tmp2);
+	tmp2 = vis_faligndata(tmp2, tmp3);
+	ACCSET(d14, tmp1, reg_H0_00);
+	ACCSET(d15, tmp2, reg_H0_01);
+
+/*
+ * left
+ */
+	sd = (mlib_d64 *)vis_alignaddr((void *)sp3, 0);
+	tmp1 = sd[0];
+	tmp2 = sd[1];
+	tmp1 = vis_faligndata(tmp1, tmp2);
+	ACCADD(d0, tmp1, reg_H2_00);
+	sd = (mlib_d64 *)((mlib_u8 *)sd + ref_stride2);
+
+	tmp1 = sd[0];
+	tmp2 = sd[1];
+	tmp1 = vis_faligndata(tmp1, tmp2);
+	ACCADD(d2, tmp1, reg_H2_10);
+	sd = (mlib_d64 *)((mlib_u8 *)sd + ref_stride2);
+
+	tmp1 = sd[0];
+	tmp2 = sd[1];
+	tmp1 = vis_faligndata(tmp1, tmp2);
+	ACCADD(d4, tmp1, reg_H2_10);
+	sd = (mlib_d64 *)((mlib_u8 *)sd + ref_stride2);
+
+	tmp1 = sd[0];
+	tmp2 = sd[1];
+	tmp1 = vis_faligndata(tmp1, tmp2);
+	ACCADD(d6, tmp1, reg_H2_10);
+	sd = (mlib_d64 *)((mlib_u8 *)sd + ref_stride2);
+
+	tmp1 = sd[0];
+	tmp2 = sd[1];
+	tmp1 = vis_faligndata(tmp1, tmp2);
+	ACCADD(d8, tmp1, reg_H2_10);
+	sd = (mlib_d64 *)((mlib_u8 *)sd + ref_stride2);
+
+	tmp1 = sd[0];
+	tmp2 = sd[1];
+	tmp1 = vis_faligndata(tmp1, tmp2);
+	ACCADD(d10, tmp1, reg_H2_10);
+	sd = (mlib_d64 *)((mlib_u8 *)sd + ref_stride2);
+
+	tmp1 = sd[0];
+	tmp2 = sd[1];
+	tmp1 = vis_faligndata(tmp1, tmp2);
+	ACCADD(d12, tmp1, reg_H2_10);
+	sd = (mlib_d64 *)((mlib_u8 *)sd + ref_stride2);
+
+	tmp1 = sd[0];
+	tmp2 = vis_ld_d64_nf(sd + 1);
+	tmp1 = vis_faligndata(tmp1, tmp2);
+	ACCADD(d14, tmp1, reg_H2_00);
+
+/*
+ * right
+ */
+	sd = (mlib_d64 *)vis_alignaddr((void *)sp4, 0);
+	tmp1 = sd[0];
+	tmp2 = sd[1];
+	tmp1 = vis_faligndata(tmp1, tmp2);
+	ACCADD(d1, tmp1, reg_H2_01);
+	sd = (mlib_d64 *)((mlib_u8 *)sd + ref_stride2);
+
+	tmp1 = sd[0];
+	tmp2 = sd[1];
+	tmp1 = vis_faligndata(tmp1, tmp2);
+	ACCADD(d3, tmp1, reg_H2_11);
+	sd = (mlib_d64 *)((mlib_u8 *)sd + ref_stride2);
+
+	tmp1 = sd[0];
+	tmp2 = sd[1];
+	tmp1 = vis_faligndata(tmp1, tmp2);
+	ACCADD(d5, tmp1, reg_H2_11);
+	sd = (mlib_d64 *)((mlib_u8 *)sd + ref_stride2);
+
+	tmp1 = sd[0];
+	tmp2 = sd[1];
+	tmp1 = vis_faligndata(tmp1, tmp2);
+	ACCADD(d7, tmp1, reg_H2_11);
+	sd = (mlib_d64 *)((mlib_u8 *)sd + ref_stride2);
+
+	tmp1 = sd[0];
+	tmp2 = sd[1];
+	tmp1 = vis_faligndata(tmp1, tmp2);
+	ACCADD(d9, tmp1, reg_H2_11);
+	sd = (mlib_d64 *)((mlib_u8 *)sd + ref_stride2);
+
+	tmp1 = sd[0];
+	tmp2 = sd[1];
+	tmp1 = vis_faligndata(tmp1, tmp2);
+	ACCADD(d11, tmp1, reg_H2_11);
+	sd = (mlib_d64 *)((mlib_u8 *)sd + ref_stride2);
+
+	tmp1 = sd[0];
+	tmp2 = sd[1];
+	tmp1 = vis_faligndata(tmp1, tmp2);
+	ACCADD(d13, tmp1, reg_H2_11);
+	sd = (mlib_d64 *)((mlib_u8 *)sd + ref_stride2);
+
+	tmp1 = sd[0];
+	tmp2 = vis_ld_d64_nf(sd + 1);
+	tmp1 = vis_faligndata(tmp1, tmp2);
+	ACCADD(d15, tmp1, reg_H2_01);
+
+/*
+ * above
+ */
+	sd = (mlib_d64 *)vis_alignaddr((void *)sp2, 0);
+	tmp1 = sd[0];
+	tmp2 = sd[1];
+	tmp3 = sd[2];
+	tmp1 = vis_faligndata(tmp1, tmp2);
+	tmp2 = vis_faligndata(tmp2, tmp3);
+	ACCPUT(dp[0], d0, tmp1, reg_H1_00);
+	ACCPUT(dp[1], d1, tmp2, reg_H1_00);
+	sd = (mlib_d64 *)((mlib_u8 *)sd + ref_stride2);
+
+	tmp1 = sd[0];
+	tmp2 = sd[1];
+	tmp3 = sd[2];
+	tmp1 = vis_faligndata(tmp1, tmp2);
+	tmp2 = vis_faligndata(tmp2, tmp3);
+	ACCPUT(dp[2], d2, tmp1, reg_H1_10);
+	ACCPUT(dp[3], d3, tmp2, reg_H1_11);
+	sd = (mlib_d64 *)((mlib_u8 *)sd + ref_stride2);
+
+	tmp1 = sd[0];
+	tmp2 = sd[1];
+	tmp3 = sd[2];
+	tmp1 = vis_faligndata(tmp1, tmp2);
+	tmp2 = vis_faligndata(tmp2, tmp3);
+	ACCPUT(dp[4], d4, tmp1, reg_H1_20);
+	ACCPUT(dp[5], d5, tmp2, reg_H1_20);
+	sd = (mlib_d64 *)((mlib_u8 *)sd + ref_stride2);
+
+	tmp1 = sd[0];
+	tmp2 = sd[1];
+	tmp3 = vis_ld_d64_nf(sd + 2);
+	tmp1 = vis_faligndata(tmp1, tmp2);
+	tmp2 = vis_faligndata(tmp2, tmp3);
+	ACCPUT(dp[6], d6, tmp1, reg_H1_20);
+	ACCPUT(dp[7], d7, tmp2, reg_H1_20);
+
+/*
+ * below
+ */
+	sd = (mlib_d64 *)vis_alignaddr((void *)sp5, 0);
+	tmp1 = sd[0];
+	tmp2 = sd[1];
+	tmp3 = sd[2];
+	tmp1 = vis_faligndata(tmp1, tmp2);
+	tmp2 = vis_faligndata(tmp2, tmp3);
+	ACCPUT(dp[8], d8, tmp1, reg_H1_20);
+	ACCPUT(dp[9], d9, tmp2, reg_H1_20);
+	sd = (mlib_d64 *)((mlib_u8 *)sd + ref_stride2);
+
+	tmp1 = sd[0];
+	tmp2 = sd[1];
+	tmp3 = sd[2];
+	tmp1 = vis_faligndata(tmp1, tmp2);
+	tmp2 = vis_faligndata(tmp2, tmp3);
+	ACCPUT(dp[10], d10, tmp1, reg_H1_20);
+	ACCPUT(dp[11], d11, tmp2, reg_H1_20);
+	sd = (mlib_d64 *)((mlib_u8 *)sd + ref_stride2);
+
+	tmp1 = sd[0];
+	tmp2 = sd[1];
+	tmp3 = sd[2];
+	tmp1 = vis_faligndata(tmp1, tmp2);
+	tmp2 = vis_faligndata(tmp2, tmp3);
+	ACCPUT(dp[12], d12, tmp1, reg_H1_10);
+	ACCPUT(dp[13], d13, tmp2, reg_H1_11);
+	sd = (mlib_d64 *)((mlib_u8 *)sd + ref_stride2);
+
+	tmp1 = sd[0];
+	tmp2 = sd[1];
+	tmp3 = vis_ld_d64_nf(sd + 2);
+	tmp1 = vis_faligndata(tmp1, tmp2);
+	tmp2 = vis_faligndata(tmp2, tmp3);
+	ACCPUT(dp[14], d14, tmp1, reg_H1_00);
+	ACCPUT(dp[15], d15, tmp2, reg_H1_00);
+
+	return (MLIB_SUCCESS);
+}
+
+/* *********************************************************** */

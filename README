@@ -1,0 +1,47 @@
+#
+# Copyright 2008 Sun Microsystems, Inc.  All rights reserved.
+# Use is subject to license terms.
+#
+# ident	"@(#)README	9.3	08/11/07 SMI"
+#
+
+Enclosed in this directory is the source code of mediaLib which is
+used to build the following header files and libraries in Solaris:
+
+[sparc]
+/usr/include/mlib*.h
+/usr/lib/libmlib.so.2
+/usr/lib/sparcv9/libmlib.so.2
+/usr/lib/cpu/sparcv8plus/libmlib.so.2
+/usr/lib/cpu/sparcv8plus+vis/libmlib.so.2
+/usr/lib/cpu/sparcv9/sparcv9/libmlib.so.2
+/usr/lib/cpu/sparcv9+vis/sparcv9/libmlib.so.2
+/usr/lib/cpu/sparcv9+vis2/libmlib.so.2
+/usr/lib/cpu/sparcv9+vis2/sparcv9/libmlib.so.2
+
+[x86]
+/usr/include/mlib*.h
+/usr/lib/libmlib.so.2
+/usr/lib/amd64/libmlib.so.2
+/usr/lib/libmlib/libmlib_sse2.so.2
+/usr/lib/libmlib/amd64/libmlib_sse2.so.2
+
+To build mediaLib, run the following command on sparc and/or x86:
+
+	cd usr/src/mlib/build/solaris; build_mlib.sh
+
+The resulting header files and libraries will be installed under
+usr/src/mlib/dist/{sparc,x86}.
+
+The default values for the environment variables for building mediaLib
+are:
+
+	MLIB_HOME=`pwd`/usr/src/mlib
+	MLIB_CCHOME=/opt/SUNWspro
+	MLIB_CUSTOM=Solaris
+
+They can be set in advance, if needed, especially for MLIB_CCHOME which
+is the path to your compiler.
+
+Note that Sun Studio 12 C compiler or later is needed for compiling
+the SSE2 version of source code.

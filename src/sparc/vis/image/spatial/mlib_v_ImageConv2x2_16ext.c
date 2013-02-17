@@ -1,0 +1,1310 @@
+/*
+ * CDDL HEADER START
+ *
+ * The contents of this file are subject to the terms of the
+ * Common Development and Distribution License (the "License").
+ * You may not use this file except in compliance with the License.
+ *
+ * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
+ * or http://www.opensolaris.org/os/licensing.
+ * See the License for the specific language governing permissions
+ * and limitations under the License.
+ *
+ * When distributing Covered Code, include this CDDL HEADER in each
+ * file and include the License file at usr/src/OPENSOLARIS.LICENSE.
+ * If applicable, add the following below this CDDL HEADER, with the
+ * fields enclosed by brackets "[]" replaced with your own identifying
+ * information: Portions Copyright [yyyy] [name of copyright owner]
+ *
+ * CDDL HEADER END
+ */
+
+/*
+ * Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
+ * Use is subject to license terms.
+ */
+
+#pragma ident	"@(#)mlib_v_ImageConv2x2_16ext.c	9.3	07/11/05 SMI"
+
+/*
+ * FUNCTION
+ *      mlib_conv2x2_16ext.c - convolve an 16-bit image with a 2x2 kernel
+ *                      (edge = src extended)
+ *
+ *
+ * SYNOPSIS
+ *      mlib_status mlib_conv2x2ext_s16(mlib_image       *dst,
+ *                                      const mlib_image *src,
+ *                                      mlib_s32         dx_l,
+ *                                      mlib_s32         dx_r,
+ *                                      mlib_s32         dy_t,
+ *                                      mlib_s32         dy_b,
+ *                                      mlib_s32         *kernel,
+ *                                      mlib_s32         scalef_expon,
+ *                                      mlib_s32         cmask)
+ * ARGUMENT
+ *      src           Pointer to structure of source image
+ *      dst           Pointer to structure of destination image
+ *      kernel        Convolution kernel
+ *      scalef_expons The scaling factor to convert the input integer
+ *                    coefficients into floating-point coefficients:
+ *                    floating-point coeff. = integer coeff. * 2^(-scale)
+ *      cmask         Channel mask to indicate the channels to be convolved.
+ *                    Each bit of which represents a channel in the image. The
+ *                    channels corresponded to 1 bits are those to be processed.
+ *
+ * DESCRIPTION
+ *      A 2-D convolution (2x2 kernel) for 16-bit images.
+ */
+
+#include <mlib_image.h>
+#include <vis_proto.h>
+#include <mlib_c_ImageConv.h>
+#include <mlib_ImageConv.h>
+
+/* *********************************************************** */
+
+static mlib_status mlib_v_conv2x2_16ext_1(
+    mlib_image *dst,
+    const mlib_image *src,
+    mlib_s32 dx_l,
+    mlib_s32 dx_r,
+    mlib_s32 dy_t,
+    mlib_s32 dy_b,
+    const mlib_s32 *kernel,
+    mlib_s32 scalef_expon);
+
+static mlib_status mlib_v_conv2x2_16ext_2(
+    mlib_image *dst,
+    const mlib_image *src,
+    mlib_s32 dx_l,
+    mlib_s32 dx_r,
+    mlib_s32 dy_t,
+    mlib_s32 dy_b,
+    const mlib_s32 *kernel,
+    mlib_s32 scalef_expon);
+
+static mlib_status mlib_v_conv2x2_16ext_3(
+    mlib_image *dst,
+    const mlib_image *src,
+    mlib_s32 dx_l,
+    mlib_s32 dx_r,
+    mlib_s32 dy_t,
+    mlib_s32 dy_b,
+    const mlib_s32 *kernel,
+    mlib_s32 scalef_expon);
+
+static mlib_status mlib_v_conv2x2_16ext_4(
+    mlib_image *dst,
+    const mlib_image *src,
+    mlib_s32 dx_l,
+    mlib_s32 dx_r,
+    mlib_s32 dy_t,
+    mlib_s32 dy_b,
+    const mlib_s32 *kernel,
+    mlib_s32 scalef_expon);
+
+static mlib_status mlib_v_conv2x2_16ext_mask(
+    mlib_image *dst,
+    const mlib_image *src,
+    mlib_s32 dx_l,
+    mlib_s32 dx_r,
+    mlib_s32 dy_t,
+    mlib_s32 dy_b,
+    const mlib_s32 *kernel,
+    mlib_s32 scalef_expon,
+    mlib_s32 cmask);
+
+/* *********************************************************** */
+
+typedef union
+{
+	mlib_d64 value;
+	struct
+	{
+		mlib_u16 ushort0, ushort1, ushort2, ushort3;
+	} forshort;
+} type_mlib_d64;
+
+/* *********************************************************** */
+
+#define	LEFT	0
+#define	RIGHT	1
+
+#define	TOP	0
+
+#define	BOTTOM	1
+
+/* *********************************************************** */
+
+#define	GET_SRC_DST_PARAMETERS()                                \
+	adr_src = (mlib_u16 *)mlib_ImageGetData(src);           \
+	adr_dst = (mlib_u16 *)mlib_ImageGetData(dst);           \
+	slb = mlib_ImageGetStride(src) >> 1;                    \
+	dlb = mlib_ImageGetStride(dst) >> 1;                    \
+	dh = mlib_ImageGetHeight(dst);                          \
+	dw = mlib_ImageGetWidth(dst)
+
+/* *********************************************************** */
+
+#define	LOAD_KERNEL_INTO_FLOAT()                                       \
+	k1 =                                                           \
+	vis_to_float((kernel[0] & 0xFFFF0000) | ((kernel[0] >> 16) &   \
+	    0xFFFF));                                                  \
+	k2 =                                                           \
+	vis_to_float((kernel[1] & 0xFFFF0000) | ((kernel[1] >> 16) &   \
+	    0xFFFF));                                                  \
+	k3 =                                                           \
+	vis_to_float((kernel[2] & 0xFFFF0000) | ((kernel[2] >> 16) &   \
+	    0xFFFF));                                                  \
+	k4 =                                                           \
+	vis_to_float((kernel[3] & 0xFFFF0000) | ((kernel[3] >> 16) &   \
+	    0xFFFF))
+
+/* *********************************************************** */
+
+#define	PREPARE_INTERM_BUFFERS()                                          \
+	buff_src =                                                        \
+	    (mlib_d64 *)__mlib_malloc(3 * buf_slb * sizeof (mlib_d64));   \
+	if (buff_src == NULL)                                             \
+	    return (MLIB_FAILURE);                                        \
+	sbuf1 = buff_src;                                                 \
+	sbuf2 = sbuf1 + buf_slb;                                          \
+	dbuf = sbuf2 + buf_slb
+
+/* *********************************************************** */
+
+#define	PREPARE_TO_LOAD_LINE(p_buf, p_line)                     \
+	prow = p_buf;                                           \
+	dsa = (mlib_d64 *)vis_alignaddr(p_line, 0);             \
+	sd1 = dsa[0];                                           \
+	dsa++
+
+/* *********************************************************** */
+
+#define	LOAD_LINE_INTO_BUFFER(n)                                \
+	for (i = 0; i < (dw + (n)); i += 4) {                   \
+	    sd0 = sd1;                                          \
+	    sd1 = dsa[0];                                       \
+	    (*prow++) = vis_faligndata(sd0, sd1);               \
+	    dsa++;                                              \
+	}
+
+/* *********************************************************** */
+
+#define	LOAD_LINE_INTO_BUFFER_NF(n)                             \
+	for (i = 0; i < (dw + (n)); i += 4) {                   \
+	    sd0 = sd1;                                          \
+	    sd1 = vis_ld_d64_nf(dsa);                           \
+	    (*prow++) = vis_faligndata(sd0, sd1);               \
+	    dsa++;                                              \
+	}
+
+/* *********************************************************** */
+
+#define	LOOP_INI()                                              \
+	ddst = (mlib_d64 *)dbuf;                                \
+	da = d_a;                                               \
+	dend = da + (dw - 1);                                   \
+	prow = sbuf1;                                           \
+	sbuf1 = sbuf2;                                          \
+	sbuf2 = prow;                                           \
+	s1 = (mlib_d64 *)sbuf1;                                 \
+	s2 = (mlib_d64 *)sbuf2
+
+/* *********************************************************** */
+
+#define	PREPARE_TO_COPY_INTERM_BUF_TO_DST()                     \
+	ddst = dbuf;                                            \
+/*                                                              \
+ * prepare the destination addresses                            \
+ */                                                             \
+	dp = (mlib_d64 *)((mlib_addr)da & (~7));                \
+	i = ((mlib_u16 *)dp - (mlib_u16 *)da);                  \
+	ddst = vis_alignaddr(ddst, 2 * i);                      \
+/*                                                              \
+ * generate edge mask for the start point                       \
+ */                                                             \
+	emask = vis_edge16(da, dend);                           \
+	sd1 = ddst[0];                                          \
+	if (emask != 0xf) {                                     \
+	    sd0 = sd1;                                          \
+	    sd1 = ddst[1];                                      \
+	    sd0 = vis_faligndata(sd0, sd1);                     \
+	    vis_pst_16(sd0, dp++, emask);                       \
+	    ddst++;                                             \
+	    i += 4;                                             \
+	}
+
+/* *********************************************************** */
+
+#define	COPY_INTERM_BUF_TO_DST()                                \
+	for (; i <= (dw - 4); i += 4) {                         \
+	    sd0 = sd1;                                          \
+	    sd1 = ddst[1];                                      \
+	    (*dp++) = vis_faligndata(sd0, sd1);                 \
+	    ddst++;                                             \
+	}
+
+/* *********************************************************** */
+
+#define	COPY_TAIL()                                             \
+	if (i < dw) {                                           \
+	    sd0 = vis_faligndata(sd1, ddst[1]);                 \
+	    emask = vis_edge16(dp, dend);                       \
+	    vis_pst_16(sd0, dp, emask);                         \
+	}
+
+/* *********************************************************** */
+
+#define	CONV_16_BEGIN(dsrc, ka)                                 \
+	tmp0 = vis_fmuld8sux16(vis_read_hi(dsrc), ka);          \
+	tmp1 = vis_fmuld8ulx16(vis_read_hi(dsrc), ka);          \
+	tmp2 = vis_fmuld8sux16(vis_read_lo(dsrc), ka);          \
+	tmp3 = vis_fmuld8ulx16(vis_read_lo(dsrc), ka);          \
+	out0 = vis_fpadd32(tmp0, tmp1);                         \
+	out1 = vis_fpadd32(tmp2, tmp3)
+
+/* *********************************************************** */
+
+#define	CONV_16(dsrc, ka)                                       \
+	tmp0 = vis_fmuld8sux16(vis_read_hi(dsrc), ka);          \
+	tmp1 = vis_fmuld8ulx16(vis_read_hi(dsrc), ka);          \
+	tmp2 = vis_fmuld8sux16(vis_read_lo(dsrc), ka);          \
+	tmp3 = vis_fmuld8ulx16(vis_read_lo(dsrc), ka);          \
+	tmp0 = vis_fpadd32(tmp0, tmp1);                         \
+	out0 = vis_fpadd32(out0, tmp0);                         \
+	tmp2 = vis_fpadd32(tmp2, tmp3);                         \
+	out1 = vis_fpadd32(out1, tmp2)
+
+/* *********************************************************** */
+
+#define	CONV_16_MIX(dsrc1, dsrc2, ka)                           \
+	tmp0 = vis_fmuld8sux16(vis_read_lo(dsrc1), ka);         \
+	tmp1 = vis_fmuld8ulx16(vis_read_lo(dsrc1), ka);         \
+	tmp2 = vis_fmuld8sux16(vis_read_hi(dsrc2), ka);         \
+	tmp3 = vis_fmuld8ulx16(vis_read_hi(dsrc2), ka);         \
+	tmp0 = vis_fpadd32(tmp0, tmp1);                         \
+	out0 = vis_fpadd32(out0, tmp0);                         \
+	tmp2 = vis_fpadd32(tmp2, tmp3);                         \
+	out1 = vis_fpadd32(out1, tmp2)
+
+/* *********************************************************** */
+
+mlib_status
+mlib_v_conv2x2_16ext_1(
+    mlib_image *dst,
+    const mlib_image *src,
+    mlib_s32 dx_l,
+    mlib_s32 dx_r,
+    mlib_s32 dy_t,
+    mlib_s32 dy_b,
+    const mlib_s32 *kernel,
+    mlib_s32 scalef_expon)
+{
+/* pointers to dst row */
+	mlib_u16 *da, *d_a;
+
+/* pointers to src, dst data */
+	mlib_u16 *adr_dst, *adr_src, *dend;
+
+/* pointers to src rows */
+	mlib_u16 *sa;
+
+/* pointers to rows in interm. src buf */
+	mlib_d64 *buff_src, *sbuf1, *sbuf2, *prow;
+
+/* pointer to row in interm. dst buf */
+	mlib_d64 *dbuf;
+
+/* mlib_d64 pointers to rows in interm. src buf */
+	mlib_d64 *s1, *s2;
+
+/* mlib_d64 pointer to row in interm. dst buf */
+	mlib_d64 *ddst;
+
+/* data */
+	mlib_d64 d1, d2, d_1, d_2, d21, d22;
+	mlib_f32 k1, k2, k3, k4;
+
+/* src, dst and interm. buf. strides */
+	mlib_s32 dlb, slb, buf_slb;
+	mlib_s32 dh, dw;
+	mlib_d64 out0, out1, tmp0, tmp1, tmp2, tmp3;
+	mlib_d64 *dsa, *dp;
+	mlib_d64 sd0, sd1;
+	mlib_s32 emask;
+	mlib_s32 gsr_scale, i, j, end, delta;
+
+	gsr_scale = 32 - scalef_expon;
+	vis_write_gsr((gsr_scale << 3));
+
+	GET_SRC_DST_PARAMETERS();
+	LOAD_KERNEL_INTO_FLOAT();
+
+	buf_slb = (2 * dw + 26) >> 3;
+	PREPARE_INTERM_BUFFERS();
+
+	sa = adr_src;
+	d_a = adr_dst;
+
+/* load interm. src buff */
+	end = (4 - dx_l + (dx_l & ~3)) & 3;
+	end =
+	    (end <
+	    (dw + LEFT + RIGHT - dx_l - dx_r)) ? end : (dw + LEFT + RIGHT -
+	    dx_l - dx_r);
+	delta = LEFT + RIGHT - dx_l - dx_r - end;
+	j = 0;
+
+	prow = sbuf2;
+	for (i = 0; i < end; i++) {
+		*((mlib_u16 *)((mlib_u16 *)prow + dx_l + i)) = sa[i];
+	}
+
+	prow += ((dx_l + end) >> 2);
+	dsa = (mlib_d64 *)vis_alignaddr(sa, 2 * end);
+	sd1 = dsa[0];
+	dsa++;
+
+#pragma pipeloop(0)
+	LOAD_LINE_INTO_BUFFER_NF(delta);
+	j++;
+
+	if ((j > dy_t) && (j < dh + TOP + BOTTOM - dy_b))
+		sa += slb;
+
+	for (i = 0; i < dx_l; i++) {
+		*(mlib_u16 *)((mlib_u16 *)sbuf2 + i) =
+		    *(mlib_u16 *)((mlib_u16 *)sbuf2 + dx_l);
+	}
+
+	for (i = 0; i < dx_r; i++) {
+		*(mlib_u16 *)((mlib_u16 *)sbuf2 + dw + LEFT + RIGHT - dx_r +
+		    i) =
+		    *(mlib_u16 *)((mlib_u16 *)sbuf2 + dw + LEFT + RIGHT - dx_r -
+		    1);
+	}
+
+#pragma pipeloop(0)
+	for (j = 0; j < dh; j++) {
+		LOOP_INI();
+
+		prow = sbuf2;
+		for (i = 0; i < end; i++) {
+			*((mlib_u16 *)((mlib_u16 *)prow + dx_l + i)) = sa[i];
+		}
+
+		prow += ((dx_l + end) >> 2);
+		dsa = (mlib_d64 *)vis_alignaddr(sa, 2 * end);
+		sd1 = dsa[0];
+		dsa++;
+
+#pragma pipeloop(0)
+		LOAD_LINE_INTO_BUFFER_NF(delta);
+
+		for (i = 0; i < dx_l; i++) {
+			*(mlib_u16 *)((mlib_u16 *)sbuf2 + i) =
+			    *(mlib_u16 *)((mlib_u16 *)sbuf2 + dx_l);
+		}
+
+		for (i = 0; i < dx_r; i++) {
+			*(mlib_u16 *)((mlib_u16 *)sbuf2 + dw + LEFT + RIGHT -
+			    dx_r + i) =
+			    *(mlib_u16 *)((mlib_u16 *)sbuf2 + dw + LEFT +
+			    RIGHT - dx_r - 1);
+		}
+
+		vis_alignaddr(s1, 2);
+		d1 = *s1;
+		d2 = *s2;
+
+#pragma pipeloop(0)
+		for (i = 0; i < dw; i += 4) {
+			d_1 = *(s1 + 1);
+			d_2 = *(s2 + 1);
+			CONV_16_BEGIN(d1, k1);
+			d21 = vis_faligndata(d1, d_1);
+			CONV_16(d2, k3);
+			d22 = vis_faligndata(d2, d_2);
+			CONV_16(d21, k2);
+			CONV_16(d22, k4);
+			(*ddst++) = vis_fpackfix_pair(out0, out1);
+			d1 = d_1;
+			d2 = d_2;
+			s1++;
+			s2++;
+		}
+
+		PREPARE_TO_COPY_INTERM_BUF_TO_DST();
+
+#pragma pipeloop(0)
+		COPY_INTERM_BUF_TO_DST();
+		COPY_TAIL();
+
+		if (j < dh - 1 - dy_b)
+			sa = sa + slb;
+		d_a += dlb;
+	}
+
+	__mlib_free(buff_src);
+	return (MLIB_SUCCESS);
+}
+
+/* *********************************************************** */
+
+mlib_status
+mlib_v_conv2x2_16ext_2(
+    mlib_image *dst,
+    const mlib_image *src,
+    mlib_s32 dx_l,
+    mlib_s32 dx_r,
+    mlib_s32 dy_t,
+    mlib_s32 dy_b,
+    const mlib_s32 *kernel,
+    mlib_s32 scalef_expon)
+{
+/* pointers to dst row */
+	mlib_u16 *da, *d_a;
+
+/* pointers to src, dst data */
+	mlib_u16 *adr_dst, *adr_src, *dend;
+
+/* pointers to src rows */
+	mlib_u16 *sa;
+
+/* pointers to rows in interm. src buf */
+	mlib_d64 *buff_src, *sbuf1, *sbuf2, *prow;
+
+/* pointer to row in interm. dst buf */
+	mlib_d64 *dbuf;
+
+/* mlib_d64 pointers to rows in interm. src buf */
+	mlib_d64 *s1, *s2;
+
+/* mlib_d64 pointer to row in interm. dst buf */
+	mlib_d64 *ddst;
+
+/* data */
+	mlib_d64 d1, d2, d_1, d_2;
+	mlib_f32 k1, k2, k3, k4;
+
+/* src, dst and interm. buf. strides */
+	mlib_s32 dlb, slb, buf_slb;
+	mlib_s32 dh, dw;
+	mlib_d64 out0, out1, tmp0, tmp1, tmp2, tmp3;
+	mlib_d64 *dsa, *dp;
+	mlib_d64 sd0, sd1;
+	mlib_s32 emask;
+	mlib_s32 gsr_scale, i, j, end, delta;
+
+	gsr_scale = 32 - scalef_expon;
+	vis_write_gsr((gsr_scale << 3));
+
+	GET_SRC_DST_PARAMETERS();
+	LOAD_KERNEL_INTO_FLOAT();
+
+	buf_slb = (4 * dw + 26) >> 3;
+	PREPARE_INTERM_BUFFERS();
+
+	dw <<= 1;
+
+	sa = adr_src;
+	d_a = adr_dst;
+
+/* load interm. src buff */
+	end = (4 - 2 * dx_l + ((2 * dx_l) & ~3)) & 3;
+	end =
+	    (end <
+	    (dw + 2 * (LEFT + RIGHT - dx_l - dx_r))) ? end : (dw + 2 * (LEFT +
+	    RIGHT - dx_l - dx_r));
+	delta = 2 * (LEFT + RIGHT - dx_l - dx_r) - end;
+	j = 0;
+
+	prow = sbuf2;
+	for (i = 0; i < end; i++) {
+		*((mlib_u16 *)((mlib_u16 *)prow + 2 * dx_l + i)) = sa[i];
+	}
+
+	prow += ((2 * dx_l + end) >> 2);
+	dsa = (mlib_d64 *)vis_alignaddr(sa, 2 * end);
+	sd1 = dsa[0];
+	dsa++;
+
+#pragma pipeloop(0)
+	LOAD_LINE_INTO_BUFFER_NF(delta);
+	j++;
+
+	if ((j > dy_t) && (j < dh + TOP + BOTTOM - dy_b))
+		sa += slb;
+
+	for (i = 0; i < dx_l; i++) {
+		*(mlib_f32 *)((mlib_f32 *)sbuf2 + i) =
+		    *(mlib_f32 *)((mlib_f32 *)sbuf2 + dx_l);
+	}
+
+	for (i = 0; i < dx_r; i++) {
+		*(mlib_f32 *)((mlib_f32 *)sbuf2 + (dw >> 1) + (LEFT + RIGHT -
+		    dx_r) + i) =
+		    *(mlib_f32 *)((mlib_f32 *)sbuf2 + (dw >> 1) - 1 + (LEFT +
+		    RIGHT - dx_r));
+	}
+
+#pragma pipeloop(0)
+	for (j = 0; j < dh; j++) {
+		LOOP_INI();
+
+		prow = sbuf2;
+		for (i = 0; i < end; i++) {
+			*((mlib_u16 *)((mlib_u16 *)prow + 2 * dx_l + i)) =
+			    sa[i];
+		}
+
+		prow += ((2 * dx_l + end) >> 2);
+		dsa = (mlib_d64 *)vis_alignaddr(sa, 2 * end);
+		sd1 = dsa[0];
+		dsa++;
+
+#pragma pipeloop(0)
+		LOAD_LINE_INTO_BUFFER_NF(delta);
+
+		for (i = 0; i < dx_l; i++) {
+			*(mlib_f32 *)((mlib_f32 *)sbuf2 + i) =
+			    *(mlib_f32 *)((mlib_f32 *)sbuf2 + dx_l);
+		}
+
+		for (i = 0; i < dx_r; i++) {
+			*(mlib_f32 *)((mlib_f32 *)sbuf2 + (dw >> 1) + (LEFT +
+			    RIGHT - dx_r) + i) =
+			    *(mlib_f32 *)((mlib_f32 *)sbuf2 + (dw >> 1) - 1 +
+			    (LEFT + RIGHT - dx_r));
+		}
+
+		d1 = *s1;
+		d2 = *s2;
+
+#pragma pipeloop(0)
+		for (i = 0; i < dw; i += 4) {
+			d_1 = *(s1 + 1);
+			d_2 = *(s2 + 1);
+			CONV_16_BEGIN(d1, k1);
+			CONV_16(d2, k3);
+			CONV_16_MIX(d1, d_1, k2);
+			CONV_16_MIX(d2, d_2, k4);
+			(*ddst++) = vis_fpackfix_pair(out0, out1);
+			d1 = d_1;
+			d2 = d_2;
+			s1++;
+			s2++;
+		}
+
+		PREPARE_TO_COPY_INTERM_BUF_TO_DST();
+
+#pragma pipeloop(0)
+		COPY_INTERM_BUF_TO_DST();
+		COPY_TAIL();
+
+		if (j < dh - 1 - dy_b)
+			sa = sa + slb;
+		d_a += dlb;
+	}
+
+	__mlib_free(buff_src);
+	return (MLIB_SUCCESS);
+}
+
+/* *********************************************************** */
+
+mlib_status
+mlib_v_conv2x2_16ext_3(
+    mlib_image *dst,
+    const mlib_image *src,
+    mlib_s32 dx_l,
+    mlib_s32 dx_r,
+    mlib_s32 dy_t,
+    mlib_s32 dy_b,
+    const mlib_s32 *kernel,
+    mlib_s32 scalef_expon)
+{
+/* pointers to dst row */
+	mlib_u16 *da, *d_a;
+
+/* pointers to src, dst data */
+	mlib_u16 *adr_dst, *adr_src, *dend;
+
+/* pointers to src rows */
+	mlib_u16 *sa;
+
+/* pointers to rows in interm. src buf */
+	mlib_d64 *buff_src, *sbuf1, *sbuf2, *prow;
+
+/* pointer to row in interm. dst buf */
+	mlib_d64 *dbuf;
+
+/* mlib_d64 pointers to rows in interm. src buf */
+	mlib_d64 *s1, *s2;
+
+/* mlib_d64 pointer to row in interm. dst buf */
+	mlib_d64 *ddst;
+
+/* data */
+	mlib_d64 d1, d2, d_1, d_2, d21, d22;
+	mlib_f32 k1, k2, k3, k4;
+
+/* src, dst and interm. buf. strides */
+	mlib_s32 dlb, slb, buf_slb;
+	mlib_s32 dh, dw;
+	mlib_d64 out0, out1, tmp0, tmp1, tmp2, tmp3;
+	mlib_d64 *dsa, *dp;
+	mlib_d64 sd0, sd1;
+	mlib_s32 emask;
+	mlib_s32 gsr_scale, i, j, end, delta;
+
+	gsr_scale = 32 - scalef_expon;
+	vis_write_gsr((gsr_scale << 3));
+
+	GET_SRC_DST_PARAMETERS();
+	LOAD_KERNEL_INTO_FLOAT();
+
+	buf_slb = (6 * dw + 26) >> 3;
+	PREPARE_INTERM_BUFFERS();
+
+	dw *= 3;
+
+	sa = adr_src;
+	d_a = adr_dst;
+
+/* load interm. src buff */
+
+	end = (4 - 3 * dx_l + ((3 * dx_l) & ~3)) & 3;
+	end =
+	    (end <
+	    (dw + 3 * (LEFT + RIGHT - dx_l - dx_r))) ? end : (dw + 3 * (LEFT +
+	    RIGHT - dx_l - dx_r));
+	delta = 3 * (LEFT + RIGHT - dx_l - dx_r) - end;
+	j = 0;
+
+	prow = sbuf2;
+	for (i = 0; i < end; i++) {
+		*((mlib_u16 *)((mlib_u16 *)prow + 3 * dx_l + i)) = sa[i];
+	}
+
+	prow += ((3 * dx_l + end) >> 2);
+	dsa = (mlib_d64 *)vis_alignaddr(sa, 2 * end);
+	sd1 = dsa[0];
+	dsa++;
+
+#pragma pipeloop(0)
+	LOAD_LINE_INTO_BUFFER_NF(delta);
+	j++;
+
+	if ((j > dy_t) && (j < dh + TOP + BOTTOM - dy_b))
+		sa += slb;
+
+	for (i = 3 * dx_l - 1; i >= 0; i--) {
+		*(mlib_u16 *)((mlib_u16 *)sbuf2 + i) =
+		    *(mlib_u16 *)((mlib_u16 *)sbuf2 + i + 3);
+	}
+
+	for (i = 0; i < 3 * dx_r; i++) {
+		*(mlib_u16 *)((mlib_u16 *)sbuf2 + dw + 3 * (LEFT + RIGHT -
+		    dx_r) + i) =
+		    *(mlib_u16 *)((mlib_u16 *)sbuf2 + dw - 3 + 3 * (LEFT +
+		    RIGHT - dx_r) + i);
+	}
+
+#pragma pipeloop(0)
+	for (j = 0; j < dh; j++) {
+		LOOP_INI();
+
+		prow = sbuf2;
+		for (i = 0; i < end; i++) {
+			*((mlib_u16 *)((mlib_u16 *)prow + 3 * dx_l + i)) =
+			    sa[i];
+		}
+
+		prow += ((3 * dx_l + end) >> 2);
+		dsa = (mlib_d64 *)vis_alignaddr(sa, 2 * end);
+		sd1 = dsa[0];
+		dsa++;
+
+#pragma pipeloop(0)
+		LOAD_LINE_INTO_BUFFER_NF(delta);
+
+		for (i = 3 * dx_l - 1; i >= 0; i--) {
+			*(mlib_u16 *)((mlib_u16 *)sbuf2 + i) =
+			    *(mlib_u16 *)((mlib_u16 *)sbuf2 + i + 3);
+		}
+
+		for (i = 0; i < 3 * dx_r; i++) {
+			*(mlib_u16 *)((mlib_u16 *)sbuf2 + dw + 3 * (LEFT +
+			    RIGHT - dx_r) + i) =
+			    *(mlib_u16 *)((mlib_u16 *)sbuf2 + dw - 3 +
+			    3 * (LEFT + RIGHT - dx_r) + i);
+		}
+
+		vis_alignaddr(s1, 6);
+		d1 = *s1;
+		d2 = *s2;
+
+#pragma pipeloop(0)
+		for (i = 0; i < dw; i += 4) {
+			d_1 = *(s1 + 1);
+			d_2 = *(s2 + 1);
+			CONV_16_BEGIN(d1, k1);
+			d21 = vis_faligndata(d1, d_1);
+			CONV_16(d2, k3);
+			d22 = vis_faligndata(d2, d_2);
+			CONV_16(d21, k2);
+			CONV_16(d22, k4);
+			(*ddst++) = vis_fpackfix_pair(out0, out1);
+			d1 = d_1;
+			d2 = d_2;
+			s1++;
+			s2++;
+		}
+
+		PREPARE_TO_COPY_INTERM_BUF_TO_DST();
+
+#pragma pipeloop(0)
+		COPY_INTERM_BUF_TO_DST();
+		COPY_TAIL();
+
+		if (j < dh - 1 - dy_b)
+			sa = sa + slb;
+		d_a += dlb;
+	}
+
+	__mlib_free(buff_src);
+	return (MLIB_SUCCESS);
+}
+
+/* *********************************************************** */
+
+mlib_status
+mlib_v_conv2x2_16ext_4(
+    mlib_image *dst,
+    const mlib_image *src,
+    mlib_s32 dx_l,
+    mlib_s32 dx_r,
+    mlib_s32 dy_t,
+    mlib_s32 dy_b,
+    const mlib_s32 *kernel,
+    mlib_s32 scalef_expon)
+{
+/* pointers to dst row */
+	mlib_u16 *da, *d_a;
+
+/* pointers to src, dst data */
+	mlib_u16 *adr_dst, *adr_src, *dend;
+
+/* pointers to src rows */
+	mlib_u16 *sa;
+
+/* pointers to rows in interm. src buf */
+	mlib_d64 *buff_src, *sbuf1, *sbuf2, *prow;
+
+/* pointer to row in interm. dst buf */
+	mlib_d64 *dbuf;
+
+/* mlib_d64 pointers to rows in interm. src buf */
+	mlib_d64 *s1, *s2;
+
+/* mlib_d64 pointer to row in interm. dst buf */
+	mlib_d64 *ddst;
+
+/* data */
+	mlib_d64 d1, d2, d_1, d_2;
+	mlib_f32 k1, k2, k3, k4;
+
+/* src, dst and interm. buf. strides */
+	mlib_s32 dlb, slb, buf_slb;
+	mlib_s32 dh, dw;
+	mlib_d64 out0, out1, tmp0, tmp1, tmp2, tmp3;
+	mlib_d64 *dsa, *dp;
+	mlib_d64 sd0, sd1;
+	mlib_s32 emask;
+	mlib_s32 gsr_scale, i, j, delta;
+
+	gsr_scale = 32 - scalef_expon;
+	vis_write_gsr((gsr_scale << 3));
+
+	GET_SRC_DST_PARAMETERS();
+	LOAD_KERNEL_INTO_FLOAT();
+
+	buf_slb = (8 * dw + 26) >> 3;
+	PREPARE_INTERM_BUFFERS();
+
+	dw *= 4;
+
+	sa = adr_src;
+	d_a = adr_dst;
+
+/* load interm. src buff */
+
+	delta = 4 * (LEFT + RIGHT - dx_l - dx_r);
+	j = 0;
+
+	prow = sbuf2;
+	prow += dx_l;
+	dsa = (mlib_d64 *)vis_alignaddr(sa, 0);
+	sd1 = dsa[0];
+	dsa++;
+
+#pragma pipeloop(0)
+	LOAD_LINE_INTO_BUFFER_NF(delta);
+	j++;
+
+	if ((j > dy_t) && (j < dh + TOP + BOTTOM - dy_b))
+		sa += slb;
+
+	for (i = 0; i < dx_l; i++) {
+		sbuf2[i] = sbuf2[dx_l];
+	}
+
+	for (i = 0; i < dx_r; i++) {
+		sbuf2[(dw >> 2) + (LEFT + RIGHT - dx_r) + i] =
+		    sbuf2[(dw >> 2) - 1 + (LEFT + RIGHT - dx_r)];
+	}
+
+#pragma pipeloop(0)
+	for (j = 0; j < dh; j++) {
+		LOOP_INI();
+
+		prow = sbuf2;
+		prow += dx_l;
+		dsa = (mlib_d64 *)vis_alignaddr(sa, 0);
+		sd1 = dsa[0];
+		dsa++;
+
+#pragma pipeloop(0)
+		LOAD_LINE_INTO_BUFFER_NF(delta);
+
+		for (i = 0; i < dx_l; i++) {
+			sbuf2[i] = sbuf2[dx_l];
+		}
+
+		for (i = 0; i < dx_r; i++) {
+			sbuf2[(dw >> 2) + (LEFT + RIGHT - dx_r) + i] =
+			    sbuf2[(dw >> 2) - 1 + (LEFT + RIGHT - dx_r)];
+		}
+
+		d1 = *s1;
+		d2 = *s2;
+
+#pragma pipeloop(0)
+		for (i = 0; i < dw; i += 4) {
+			d_1 = *(s1 + 1);
+			d_2 = *(s2 + 1);
+			CONV_16_BEGIN(d1, k1);
+			CONV_16(d2, k3);
+			CONV_16(d_1, k2);
+			CONV_16(d_2, k4);
+			(*ddst++) = vis_fpackfix_pair(out0, out1);
+			d1 = d_1;
+			d2 = d_2;
+			s1++;
+			s2++;
+		}
+
+		PREPARE_TO_COPY_INTERM_BUF_TO_DST();
+
+#pragma pipeloop(0)
+		COPY_INTERM_BUF_TO_DST();
+		COPY_TAIL();
+
+		if (j < dh - 1 - dy_b)
+			sa = sa + slb;
+		d_a += dlb;
+	}
+
+	__mlib_free(buff_src);
+	return (MLIB_SUCCESS);
+}
+
+/* *********************************************************** */
+
+mlib_status
+mlib_v_conv2x2_16ext_mask(
+    mlib_image *dst,
+    const mlib_image *src,
+    mlib_s32 dx_l,
+    mlib_s32 dx_r,
+    mlib_s32 dy_t,
+    mlib_s32 dy_b,
+    const mlib_s32 *kernel,
+    mlib_s32 scalef_expon,
+    mlib_s32 cmask)
+{
+/* pointers to dst row */
+	mlib_u16 *da, *d_a;
+
+/* pointers to src, dst data */
+	mlib_u16 *adr_dst, *adr_src, *dend;
+
+/* pointers to src rows */
+	mlib_u16 *sa, *sa1, *sa2, *sa_2;
+
+/* pointers to rows in interm. src buf */
+	mlib_u16 *buff_src, *sbuf1, *sbuf2, *prow;
+	mlib_u16 *s_buf1;
+
+/* mlib_d64 pointers to rows in interm. src buf */
+	mlib_d64 *s1, *s2;
+
+/* src, dst and interm. buf. strides */
+	mlib_s32 dlb, slb, buf_slb;
+	mlib_s32 dh, dw;
+	mlib_d64 out0, out1, tmp0, tmp1, tmp2, tmp3;
+
+/* data */
+	mlib_d64 d1, d2, d_1, d_2;
+
+/* shifted data */
+	mlib_d64 d21, d22;
+
+/* coefficients */
+	mlib_f32 k1, k2, k3, k4;
+	mlib_s32 gsr_scale, i, j, nchannel, chan, testchan;
+	mlib_u16 t1, t2, t3, t4, t5, t6, t7, t8;
+	type_mlib_d64 str;
+
+	gsr_scale = 32 - scalef_expon;
+	vis_write_gsr((gsr_scale << 3) + 2);
+
+	GET_SRC_DST_PARAMETERS();
+	nchannel = mlib_ImageGetChannels(src);
+	LOAD_KERNEL_INTO_FLOAT();
+
+/* buf_slb - 8-byte aligned */
+	buf_slb = (2 * dw + 32) & (~7);
+/* alloc. interm. src buffer */
+	buff_src =
+	    (mlib_u16 *)__mlib_malloc(2 * buf_slb * sizeof (mlib_u8) + 8);
+
+	if (buff_src == NULL)
+		return (MLIB_FAILURE);
+
+	buf_slb >>= 1;
+
+	sbuf1 = (mlib_u16 *)((mlib_addr)(buff_src + 8) & (~7));
+	sbuf2 = sbuf1 + buf_slb;
+
+	testchan = 1;
+
+	for (chan = nchannel - 1; chan >= 0; chan--) {
+		if ((cmask & testchan) == 0) {
+			testchan <<= 1;
+			continue;
+		}
+
+		testchan <<= 1;
+		i = 0;
+		sa = adr_src + chan;
+		i++;
+
+		if ((i > dy_t) && (i < dh + TOP + BOTTOM - dy_b))
+			sa1 = sa + slb;
+		else
+			sa1 = sa;
+		i++;
+
+		if ((i > dy_t) && (i < dh + TOP + BOTTOM - dy_b))
+			sa2 = sa1 + slb;
+		else
+			sa2 = sa1;
+		sa_2 = sa2;
+		d_a = adr_dst + chan;
+
+/* load interm. src buff */
+		for (i = 0, j = dx_l; j < (dw + LEFT + RIGHT - dx_r);
+		    i += nchannel, j++) {
+			sbuf1[j] = sa1[i];
+			sbuf2[j] = sa[i];
+		}
+
+		for (i = 0; i < dx_l; i++) {
+			sbuf2[i] = sbuf2[dx_l];
+		}
+
+		for (i = 0; i < dx_r; i++) {
+			sbuf2[dw + LEFT + RIGHT - dx_r + i] =
+			    sbuf2[dw + LEFT + RIGHT - dx_r - 1];
+		}
+
+		for (j = 0; j < dh - 1; j++) {
+			for (i = 0; i < dx_l; i++) {
+				sbuf1[i] = sbuf1[dx_l];
+			}
+
+			for (i = 0; i < dx_r; i++) {
+				sbuf1[dw + LEFT + RIGHT - dx_r + i] =
+				    sbuf1[dw + LEFT + RIGHT - dx_r - 1];
+			}
+
+			da = d_a;
+			prow = sbuf1;
+			sbuf1 = sbuf2;
+			sbuf2 = prow;
+			s1 = (mlib_d64 *)sbuf1;
+			s2 = (mlib_d64 *)sbuf2;
+			dend = da + (dw - 1) * nchannel;
+			s_buf1 = sbuf1 + dx_l;
+			d1 = *s1;
+			d2 = *s2;
+
+			d_1 = *(s1 + 1);
+			d_2 = *(s2 + 1);
+			CONV_16_BEGIN(d1, k1);
+			t1 = vis_ld_u16_nf(sa_2);
+			sa_2 += nchannel;
+			CONV_16(d2, k3);
+			d21 = vis_faligndata(d1, d_1);
+			t2 = vis_ld_u16_nf(sa_2);
+			sa_2 += nchannel;
+			d22 = vis_faligndata(d2, d_2);
+			CONV_16(d21, k2);
+			t3 = vis_ld_u16_nf(sa_2);
+			sa_2 += nchannel;
+			CONV_16(d22, k4);
+			t4 = vis_ld_u16_nf(sa_2);
+			sa_2 += nchannel;
+			(*s_buf1++) = t1;
+			(*s_buf1++) = t2;
+			str.value = vis_fpackfix_pair(out0, out1);
+			(*s_buf1++) = t3;
+			d1 = d_1;
+			d2 = d_2;
+			(*s_buf1++) = t4;
+			s1++;
+			s2++;
+
+/*
+ * in each iteration store result from prev. iterat.
+ * and load data for processing next row
+ */
+#pragma pipeloop(0)
+			for (i = 4; i < dw; i += 4) {
+				t1 = vis_ld_u16_nf(sa_2);
+				sa_2 += nchannel;
+				t2 = vis_ld_u16_nf(sa_2);
+				sa_2 += nchannel;
+				d_1 = *(s1 + 1);
+				d_2 = *(s2 + 1);
+				CONV_16_BEGIN(d1, k1);
+				t3 = vis_ld_u16_nf(sa_2);
+				sa_2 += nchannel;
+				t4 = vis_ld_u16_nf(sa_2);
+				sa_2 += nchannel;
+				CONV_16(d2, k3);
+				t5 = str.forshort.ushort0;
+				t6 = str.forshort.ushort1;
+				d21 = vis_faligndata(d1, d_1);
+				t7 = str.forshort.ushort2;
+				d22 = vis_faligndata(d2, d_2);
+				t8 = str.forshort.ushort3;
+				CONV_16(d21, k2);
+				(*s_buf1++) = t1;
+				(*s_buf1++) = t2;
+				CONV_16(d22, k4);
+				(*s_buf1++) = t3;
+				(*s_buf1++) = t4;
+				*da = t5;
+				da += nchannel;
+				str.value = vis_fpackfix_pair(out0, out1);
+				*da = t6;
+				da += nchannel;
+				d1 = d_1;
+				d2 = d_2;
+				*da = t7;
+				da += nchannel;
+				s1++;
+				s2++;
+				*da = t8;
+				da += nchannel;
+			}
+
+			(*s_buf1++) = vis_ld_u16_nf(sa_2);
+			sa_2 += nchannel;
+			(*s_buf1++) = vis_ld_u16_nf(sa_2);
+			sa_2 += nchannel;
+			(*s_buf1++) = vis_ld_u16_nf(sa_2);
+			sa_2 += nchannel;
+			(*s_buf1++) = vis_ld_u16_nf(sa_2);
+
+			if ((mlib_addr)da <= (mlib_addr)dend) {
+				*da = str.forshort.ushort0;
+				da += nchannel;
+			}
+
+			if ((mlib_addr)da <= (mlib_addr)dend) {
+				*da = str.forshort.ushort1;
+				da += nchannel;
+			}
+
+			if ((mlib_addr)da <= (mlib_addr)dend) {
+				*da = str.forshort.ushort2;
+				da += nchannel;
+			}
+
+			if ((mlib_addr)da <= (mlib_addr)dend) {
+				*da = str.forshort.ushort3;
+			}
+
+			if (j < dh - 2 - dy_b) {
+				sa_2 = sa2 = sa2 + slb;
+			} else
+				sa_2 = sa2;
+			d_a += dlb;
+		}
+
+/* process last row - no need to load data */
+		for (i = 0; i < dx_l; i++) {
+			sbuf1[i] = sbuf1[dx_l];
+		}
+
+		for (i = 0; i < dx_r; i++) {
+			sbuf1[dw + LEFT + RIGHT - dx_r + i] =
+			    sbuf1[dw + LEFT + RIGHT - dx_r - 1];
+		}
+
+		da = d_a;
+		prow = sbuf1;
+		sbuf1 = sbuf2;
+		sbuf2 = prow;
+		s1 = (mlib_d64 *)sbuf1;
+		s2 = (mlib_d64 *)sbuf2;
+		dend = da + (dw - 1) * nchannel;
+		d1 = *s1;
+		d2 = *s2;
+
+		d_1 = *(s1 + 1);
+		d_2 = *(s2 + 1);
+		CONV_16_BEGIN(d1, k1);
+		CONV_16(d2, k3);
+		d21 = vis_faligndata(d1, d_1);
+		d22 = vis_faligndata(d2, d_2);
+		CONV_16(d21, k2);
+		CONV_16(d22, k4);
+		d1 = d_1;
+		d2 = d_2;
+		s1++;
+		s2++;
+
+#pragma pipeloop(0)
+		for (i = 4; i < dw; i += 4) {
+			str.value = vis_fpackfix_pair(out0, out1);
+			d_1 = *(s1 + 1);
+			d_2 = *(s2 + 1);
+			CONV_16_BEGIN(d1, k1);
+			t5 = str.forshort.ushort0;
+			CONV_16(d2, k3);
+			d21 = vis_faligndata(d1, d_1);
+			t6 = str.forshort.ushort1;
+			d22 = vis_faligndata(d2, d_2);
+			CONV_16(d21, k2);
+			t7 = str.forshort.ushort2;
+			CONV_16(d22, k4);
+			t8 = str.forshort.ushort3;
+			*da = t5;
+			da += nchannel;
+			*da = t6;
+			da += nchannel;
+			*da = t7;
+			da += nchannel;
+			d1 = d_1;
+			d2 = d_2;
+			*da = t8;
+			da += nchannel;
+			s1++;
+			s2++;
+		}
+
+		str.value = vis_fpackfix_pair(out0, out1);
+
+		if ((mlib_addr)da <= (mlib_addr)dend) {
+			*da = str.forshort.ushort0;
+			da += nchannel;
+		}
+
+		if ((mlib_addr)da <= (mlib_addr)dend) {
+			*da = str.forshort.ushort1;
+			da += nchannel;
+		}
+
+		if ((mlib_addr)da <= (mlib_addr)dend) {
+			*da = str.forshort.ushort2;
+			da += nchannel;
+		}
+
+		if ((mlib_addr)da <= (mlib_addr)dend) {
+			*da = str.forshort.ushort3;
+		}
+	}
+
+	__mlib_free(buff_src);
+	return (MLIB_SUCCESS);
+}
+
+/* *********************************************************** */
+
+mlib_status
+mlib_conv2x2ext_s16(
+    mlib_image *dst,
+    const mlib_image *src,
+    mlib_s32 dx_l,
+    mlib_s32 dx_r,
+    mlib_s32 dy_t,
+    mlib_s32 dy_b,
+    const mlib_s32 *kernel,
+    mlib_s32 scalef_expon,
+    mlib_s32 cmask)
+{
+	mlib_s32 nchannel, chan, cmask1, i;
+	mlib_status res;
+
+	if (mlib_ImageConvVersion(2, 2, scalef_expon, MLIB_SHORT) == 0)
+		return mlib_c_conv2x2ext_s16(dst, src, dx_l, dx_r, dy_t, dy_b,
+		    kernel, scalef_expon, cmask);
+
+	cmask1 = cmask;
+	nchannel = mlib_ImageGetChannels(src);
+	chan = 0;
+	for (i = nchannel - 1; i >= 0; i--, cmask1 >>= 1)
+		if ((cmask1 & 1) == 1)
+			chan++;
+
+	if ((chan == nchannel)) {
+		switch (nchannel) {
+		case 1:
+			res =
+			    mlib_v_conv2x2_16ext_1(dst, src, dx_l, dx_r, dy_t,
+			    dy_b, kernel, scalef_expon);
+			break;
+		case 2:
+			res =
+			    mlib_v_conv2x2_16ext_2(dst, src, dx_l, dx_r, dy_t,
+			    dy_b, kernel, scalef_expon);
+			break;
+		case 3:
+			res =
+			    mlib_v_conv2x2_16ext_3(dst, src, dx_l, dx_r, dy_t,
+			    dy_b, kernel, scalef_expon);
+			break;
+		case 4:
+			res =
+			    mlib_v_conv2x2_16ext_4(dst, src, dx_l, dx_r, dy_t,
+			    dy_b, kernel, scalef_expon);
+			break;
+		default:
+			res = MLIB_FAILURE;
+			break;
+		}
+	} else
+		res =
+		    mlib_v_conv2x2_16ext_mask(dst, src, dx_l, dx_r, dy_t, dy_b,
+		    kernel, scalef_expon, cmask);
+	return (res);
+}
+
+/* *********************************************************** */

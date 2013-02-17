@@ -1,0 +1,407 @@
+#
+# CDDL HEADER START
+#
+# The contents of this file are subject to the terms of the
+# Common Development and Distribution License (the "License").
+# You may not use this file except in compliance with the License.
+#
+# You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
+# or http://www.opensolaris.org/os/licensing.
+# See the License for the specific language governing permissions
+# and limitations under the License.
+#
+# When distributing Covered Code, include this CDDL HEADER in each
+# file and include the License file at usr/src/OPENSOLARIS.LICENSE.
+# If applicable, add the following below this CDDL HEADER, with the
+# fields enclosed by brackets "[]" replaced with your own identifying
+# information: Portions Copyright [yyyy] [name of copyright owner]
+#
+# CDDL HEADER END
+#
+
+#
+# Copyright 2005 Sun Microsystems, Inc.  All rights reserved.
+# Use is subject to license terms.
+#
+# ident	"@(#)README	9.2	07/10/08 SMI"
+#
+
+This file describes the layout and conventions of the make tree used in
+the mediaLib.
+
+All of these "make" trees are substantially similar.
+This make tree is similar to the XIL make tree except that in XIL the
+tree 'leaves' do both compilation and linking, while in mediaLib the
+tree 'leaves' only do compilation.  Library linking is done one level up
+the directory level. Therefore, the rule files are quite different from XIL's.
+
+The advantages of this make tree are:
+
+    *  Simple makefiles.  All the target and rules are defined in
+       different configuration files.  Only the configuration files need
+       to be modified if changes are needed.
+
+
+    *  Support for different compilers and operating systems
+        on a per-user basis.  Using the same sources (including
+        Makefiles) one developer can develop and test under different
+        platforms.
+        So far this configuration has been tested in Solaris sparc,
+        and Solaris x86 with SunPro compiler, and the Windows NT with
+        MS Visual C/C++ 5.0.
+
+    *  Support for compiling "variants" such as debug,
+        profile, and tcov versions.  These variants can be built
+        recursively.
+
+This description attempts to cover all aspects of the Makefile tree.  Most
+of what is described here is maintained automatically by the configuration
+files.
+
+There are 2 main types of Makefile:
+
+    directory and leaf.
+
+Directory Makefiles
+-------------------
+
+    A Makefile in a source directory with sub-directories is called a
+    "directory" Makefile.
+
+    Directory Makefile's are responsible for recursing into their
+    sub-directories and propagating the make as well as generating the
+    library for that directory.
+
+    For example, directory src/solaris/ will contain only a Makefile and
+    sub-directories.  No actual source code will reside in the directory.
+    The following commands:
+
+        $ cd src/solaris
+        $ make all
+
+    would descend into all the sub-directories of 'src/solaris' and recursively
+    perform a 'make all'.  After that it will link the necessary object file
+    to create a library.
+
+    Look at make/rules/directory.cfg and  make/rules/lib.cfg for detail.
+
+
+Leaf Makefiles
+--------------
+
+    Source directories that contain source code for libraries or
+    programs use a "leaf" Makefile.
+
+    These makefiles contain the rules necessary to build programs
+    (or libraries).
+
+    Look at make/rules/leaf.cfg for detail.
+
+
+NOTE: To simplify nested makefile's and source maintenance, we disallow
+combining source and directories (that make(1) would be expected to
+recurse into) in one source directory.  Ie., a directory in the source
+tree may contain EITHER source files OR recursive sub directories, but NOT
+both.
+
+Variants (where objects go)
+---------------------------
+
+    All binary targets are placed in a sub-directory relative to the
+    top source directory whose name is (for example):
+
+        builds/solaris/sparc/          -- Solaris SPARC binaries (optimized).
+        builds/solaris/sparc-debug/    -- Solaris SPARC debug binaries
+        builds/solaris/x86/            -- Solaris x86 binaries (optimized).
+        builds/solaris/x86-debug/      -- Solaris x86 debug binaries
+        builds/windows/x86/            -- Windows NT binaries (optimized)
+        builds/windows/x86-debug/      -- Windows NT debug binaries.
+
+    Within a Makefile, the ${ARCH} variable is set to sparc, sparc-debug,
+    etc., as appropriate.
+
+    For Solaris sparc:
+
+    * 'make all' or 'make' will generate all versions for Solaris 2.5.1 or
+       Solaris 2,6, sparcv8, sparcv8plus and sparcv8plus+vis, of  object files
+       and libraries under sparc/obj and sparc/lib, respectively.
+
+    * 'make all_v9' will generate all SPARC V9 versions for Solaris 2.7,
+      sparcv9 and sparcv9+vis, of  object files and libraries under sparc/obj
+      and sparc/lib, respectively.
+
+    * 'make com', 'make v8p', 'make v8pa', 'make v9' and 'make v9a' will
+      generate the corresponding sparcv8, sparcv8plus, sparcv8plus+vis,
+      sparcv9, sparcv9+vis, object files and libraries only.
+
+    * 'make debug_all' works similarly to 'make all' except the files are
+      compiled with debug options turned on and the object files are placed
+      under 'sparc-debug'.
+
+    * 'make debug_all_v9' works similarly to 'make all_v9' except the files
+      are compiled with debug options turned on and the object files are
+      placed under 'sparc-debug'.
+
+    * 'make debug', 'make debug_v8p', 'make debug_v8pa', 'make debug_v9' and
+      'make debug_v9a' are the debug version of 'make com', 'make v8p',
+      'make v8pa', 'make v9' and 'make v9a', respectively.
+
+    * 'make clean_all' removes all versions of the optimized object files.
+
+    * 'make clean', 'make clean_v8p', 'make clean_v8pa', 'make clean_v9',
+      'make clean_v9a' remove the individual version of optimized object files.
+
+    * 'make clean_debug_all' removes all versions of the debug object files.
+
+    * 'make clean_debug', 'make clean_debug_v8p', 'make clean_debug_v8pa',
+      'make clean_debug_v9' and 'make clean_debug_v9a' remove the individual
+      version of debug object files.
+
+    For Solaris x86:
+
+    * Only 'all', 'com', 'debug', 'clean', 'clean_all' (same as 'clean'),
+      'clean_debug', and 'clean_debug_all' (same as 'clean_debug') work.
+
+    For Linux x86:
+
+    * Only 'all', 'com', 'debug', 'clean', 'clean_all' (same as 'clean'),
+      'clean_debug', and 'clean_debug_all' (same as 'clean_debug') work.
+
+    For Windows NT/2000/XP:
+
+    * Only 'all', 'com', 'debug', 'clean', 'clean_all' (same as 'clean'),
+      'clean_debug', and 'clean_debug_all' (same as 'clean_debug') work.
+
+Configuration
+-------------
+
+    All the real work described here happens in file(s) included
+    from your Makefile.
+
+    All Makefiles include a customization file which is used to select
+    compiler and host operating system.  The environment variable
+    MLIB_CUSTOM will be used to point to make/custom/$(MLIB_CUSTOM).cfg
+
+    All leaf Makefile's also include either 'make/rules/leaf.cfg' (or
+    'make/rules/lib.cfg' for building libraries).  These config files provide
+    default rules and set up the command macros as appropriate.
+
+    All directory Makefiles include 'make/rules/directory.cfg'.  directory.cfg
+    provides all the rules for recursing through sub directories.
+
+    'make/rules/leaf.cfg' (or directory.cfg) in turn includes:
+
+        a file specifying general purpose rules appropriate for
+            both leaf and directory makefiles.
+            ( make/main.cfg )
+
+        personality modules specified by the customization file for:
+            compiler            ( make/compilers/?? )
+            operating system    ( make/os/?? )
+
+
+    private customization files
+    ---------------------------
+
+        [ $(MLIB_CUSTOM) ]
+
+        Your own private configuration file.  Specifies which of the above
+        files you want to include.
+
+        Example: custom/Solaris.cfg
+
+            CONFIG.sparc.OS=$(CONFIG_DIR)/os/SunOS5.cfg
+		Sets up system command names
+
+            CONFIG.sparc.C=$(CONFIG_DIR)/compilers/SunOS5.cfg
+		Specifies compiler specific commands and flags.
+
+
+    generic rules file
+    ------------------
+
+        [ make/main.cfg ]
+        included by leaf.cfg or directory.cfg.
+
+        This file contains some standard rules and variable assignments
+        that all Makefiles need.
+
+        It also includes the FORCEIT: pseudo targets, needed by
+	the directory.cfg recursive rules.
+
+
+    OS config file for host machine
+    -------------------------------
+
+        [ make/os/OS-NAME.cfg ]
+        included by main.cfg
+
+        Figures out the target architecture and specifies command names
+        for the OS tools including sccs (but NOT for the compiler tools).
+
+
+    Compiler configuration for the target
+    -------------------------------------
+
+        [ compilers/COMPILER-NAME.cfg ]
+        included by leaf.cfg
+
+        Specifies the names of tools for compiling programs.
+        Names in here should be fully qualified, and NOT depend on $PATH.
+
+        Also specifies compiler flags to be used to generate optimized,
+        debugging and profile versions, as well as rules to compile
+        assembly language.
+
+
+Configuration Variables
+-----------------------
+
+    Variables you have to set in the environment or in your Makefile.
+
+    Environment Variables
+    ---------------------
+
+	MLIB_HOME     -- The root directory of mediaLib source.
+        MLIB_CUSTOM   -- Name of your config file in make/custom (without
+			 .cfg extension).
+	MLIB_CCHOME   -- For Solaris only, the directory of C compiler.
+
+        MLIB_HOME is used in the custom files to generate PROJECT_ROOT,
+        which is used within the make config files themselves.
+
+    Preset variables
+    ----------------
+
+	The following macros are provided by make on Solaris for use with
+	cross-compilation.  They have to be defined similarly on other
+	platforms.
+
+	HOST_ARCH   -- The machine architecture of the host system.
+                       By  default,  this  is  the  output  of  the
+                       mach(1) command, prepended with  `-'.  Under
+                       normal   circumstances,  this  value  should
+                       never be altered by the user.
+                       [ eg: -sparc or -i386 on Solaris,
+                             -x86 on Linux and Windows ]
+
+	TARGET_ARCH -- The machine architecture of the target system.
+                       By default, the output of mach(1), prepended
+                       with `-'.
+                       [ eg: -sparc or -i386 on Solaris,
+                             -x86 on Linux and Windows ]
+
+        Aside from command names set by the os and compiler config files,
+        a number of MAKE variables are automatically set and maintained by
+        the config files.
+
+        CONFIG.$(HOST_ARCH_NAME).OS
+                    -- full path of OS config file, set by
+                       custom config file.
+
+        CONFIG.$(HOST_ARCH_NAME).C
+                    -- full path of cc compilation config file, set by custom
+                       config file.
+
+        CONFIG.$(HOST_ARCH_NAME).OVERRIDES
+                    -- full path name of file to be included at the bottom
+                       of 'leaf.cfg' (and 'lib.cfg').  Allows overriding of
+                       defaults.  Usually set to /dev/null.
+
+        TARCH       -- ${TARGET_ARCH} without the '-'
+                       [ eg: sparc or i386 on Solaris,
+                             x86 on Linux and Windows ]
+
+        ARCH        -- target sub-directory for object code and libraries
+                       [ eg: sparc or x86 on Solaris,
+                             x86 on Linux and Windows ]
+
+        HOST_ARCH_NAME
+                    -- host machine architecture name
+                       [ eg: sparc or i386 on Solaris ]
+
+	TARGET_OS   -- The os of the target system.
+                       [ eg: solaris, linux, windows ]
+
+    Preset compilation variables
+    ----------------------------
+
+        This is a list of some of the compilation variables.
+        Refer to the compiler config files for the complete list.
+
+        CFLAGS_OPTIMIZE_V   -- value of optimize flag for compiler
+                               [ eg: -O ]
+
+        CFLAGS_DEBUG_V      -- value of debug flag for compiler
+                               [ eg: -g ]
+
+        CFLAGS_DEBUG_OPTIMIZE_V
+                            -- optimize flag if compiling for debug
+                               [ eg: "" ]
+
+        CFLAGS_DEBUG
+        CFLAGS_OPTIMIZE     -- current values for each depending
+                               on make variant.
+
+        LDFLAGS_STATIC_LIBRARIES_V
+                            -- ld option for static libraries
+                               -Bstatic or -dy (svr4)
+
+        LDFLAGS_SHARED_LIBRARIES_V
+                            -- ld option for dynamic libraries
+                               -Bdynamic or -dn (svr4)
+
+
+Makefile Variables
+------------------
+
+	The following variables may be set in a typical Makefile.
+
+	TOP_DIR		-- Path to the top directory, specified in relative
+                           path.
+
+	MODNAME		-- Name of the module, i.e. 'image', 'algebra', etc.
+
+	ALT_MOD		-- Name of the alternative module.
+			   Used when a module needs functions from another
+			   module.
+
+	ALT_UTILS_MOD	-- Name of the alternative utility module.
+			   Used when a module needs utility functions from
+			   another module.  This can be used with AL_MOD
+			   together if functions from more
+			   than one module are needed.
+
+	LIBNAME		-- Name of the shared library, without extension
+                           suffix and the 'lib' prefix.
+
+	DEFINES		-- cc -D items.  Included in CPPFLAGS.
+                           leaf Makefiles.
+                           [ eg: DEFINES += -DUNIX ]
+
+	CPPFLAGS	-- -I include directories.
+                 	   leaf Makefiles.
+			   [ eg: CPPFLAGS += -I../include ]
+
+	SUB_DIRS	-- list of sub directories for make recursion.
+                           directory Makefiles only.
+                           [ eg: SUB_DIRS=image algebra ]
+
+	SRCS_C		-- List of C version source files.
+
+	SRCS_V		-- List of VIS version C source files.
+
+	UTILS_C		-- List of C version utility source files.
+
+	UTILS_V		-- List of VIS version utility source files.
+
+	SRCS		-- Set to SRCS_C and UTILS_C by default.  It is set
+			   SRCS_V and UTILS_V in leaf.cfg when building VIS
+			   version.
+
+	OBJS		-- List of object files. It is derived from SRCS.
+
+NOTE:
+    It is usually useful to use 'make -D -d' and re-direct the output to
+    a file to see what files are read by make and what targets or dependencies
+    are set when make does not work properly.

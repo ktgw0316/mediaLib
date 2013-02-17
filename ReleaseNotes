@@ -1,0 +1,11 @@
+#
+# Copyright 2008 Sun Microsystems, Inc.  All rights reserved.
+# Use is subject to license terms.
+#
+# ident	"@(#)ReleaseNotes	9.4	08/11/07 SMI"
+#
+
+The 2008.11.07 release of the source code for mediaLib
+was used to build the files and libraries delivered into snv_103.
+
+See README for build instructions.

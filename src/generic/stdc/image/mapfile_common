@@ -1,0 +1,87 @@
+#
+# CDDL HEADER START
+#
+# The contents of this file are subject to the terms of the
+# Common Development and Distribution License (the "License").
+# You may not use this file except in compliance with the License.
+#
+# You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
+# or http://www.opensolaris.org/os/licensing.
+# See the License for the specific language governing permissions
+# and limitations under the License.
+#
+# When distributing Covered Code, include this CDDL HEADER in each
+# file and include the License file at usr/src/OPENSOLARIS.LICENSE.
+# If applicable, add the following below this CDDL HEADER, with the
+# fields enclosed by brackets "[]" replaced with your own identifying
+# information: Portions Copyright [yyyy] [name of copyright owner]
+#
+# CDDL HEADER END
+#
+
+#
+# Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
+# Use is subject to license terms.
+#
+# ident	"@(#)mapfile_common	9.3	07/10/09 SMI"
+#
+
+SUNW_2.0 {
+    global:
+        mlib_ImageCreate;
+        mlib_ImageCreateStruct;
+        mlib_ImageCreateSubimage;
+        mlib_ImageDelete;
+        mlib_ImageClear;
+    local:
+        *;
+};
+
+SUNW_2.1 {
+    global:
+        mlib_ImageSetPaddings;
+} SUNW_2.0;
+
+SUNW_2.2 {
+    global:
+        mlib_ImageSetFormat;
+} SUNW_2.1;
+
+SUNW_2.3 {
+    global:
+        mlib_ImageSetStruct;
+        mlib_ImageResetStruct;
+} SUNW_2.2;
+
+SUNW_2.5 {
+    global:
+        mlib_ImageSetSubimageStruct;
+        mlib_ImageResetSubimageStruct;
+} SUNW_2.3;
+
+SUNWprivate_2.2 {
+    global:
+        __mlib_ImageCreate;
+        __mlib_ImageCreateStruct;
+        __mlib_ImageCreateSubimage;
+        __mlib_ImageDelete;
+        __mlib_ImageClear;
+        __mlib_ImageSetPaddings;
+        __mlib_ImageSetFormat;
+        mlib_ImageSet;
+        mlib_ImageSetSubimage;
+        mlib_ImageCreateRowTable;
+        mlib_ImageDeleteRowTable;
+};
+
+SUNWprivate_2.3 {
+    global:
+        __mlib_ImageSetStruct;
+        __mlib_ImageResetStruct;
+} SUNWprivate_2.2;
+
+SUNWprivate_2.5 {
+    global:
+        __mlib_ImageSetSubimageStruct;
+        __mlib_ImageResetSubimageStruct;
+} SUNWprivate_2.3;
